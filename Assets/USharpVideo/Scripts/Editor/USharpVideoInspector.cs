@@ -1,9 +1,8 @@
-﻿
-using UnityEditor;
+﻿using UnityEditor;
 using UdonSharpEditor;
 using UnityEditorInternal;
 using UnityEngine;
-using VRC.SDK3.Video.Components.AVPro;
+
 using System.Reflection;
 
 #pragma warning disable CS0612 // Type or member is obsolete
@@ -35,7 +34,8 @@ namespace UdonSharp.Video.Internal
         {
             allowSeekProperty = serializedObject.FindProperty(nameof(USharpVideoPlayer.allowSeeking));
             defaultUnlockedProperty = serializedObject.FindProperty("defaultUnlocked");
-            allowCreatorControlProperty = serializedObject.FindProperty(nameof(USharpVideoPlayer.allowInstanceCreatorControl));
+            allowCreatorControlProperty = serializedObject.FindProperty("allowInstanceCreatorControl");
+
             syncFrequencyProperty = serializedObject.FindProperty(nameof(USharpVideoPlayer.syncFrequency));
             syncThresholdProperty = serializedObject.FindProperty(nameof(USharpVideoPlayer.syncThreshold));
 
@@ -44,7 +44,7 @@ namespace UdonSharp.Video.Internal
 
             defaultStreamMode = serializedObject.FindProperty("defaultStreamMode");
 
-            playlistProperty = serializedObject.FindProperty(nameof(USharpVideoPlayer.playlist));
+            playlistProperty = serializedObject.FindProperty("playlist");
             loopPlaylistProperty = serializedObject.FindProperty(nameof(USharpVideoPlayer.loopPlaylist));
             shufflePlaylistProperty = serializedObject.FindProperty(nameof(USharpVideoPlayer.shufflePlaylist));
 
@@ -52,14 +52,18 @@ namespace UdonSharp.Video.Internal
             playlistList.drawElementCallback = (Rect rect, int index, bool isActive, bool isFocused) =>
             {
                 Rect testFieldRect = new Rect(rect.x, rect.y + 2, rect.width, EditorGUIUtility.singleLineHeight);
-
                 EditorGUI.PropertyField(testFieldRect, playlistList.serializedProperty.GetArrayElementAtIndex(index), label: new GUIContent());
             };
-            playlistList.drawHeaderCallback = (Rect rect) => { EditorGUI.LabelField(rect, new GUIContent("Default Playlist URLs", "URLs that will play in sequence when you join the world until someone puts in a video.")); };
+            playlistList.drawHeaderCallback = (Rect rect) =>
+            {
+                EditorGUI.LabelField(rect, new GUIContent("Default Playlist URLs", "URLs that will play in sequence when you join the world until someone puts in a video."));
+            };
         }
 
         public override void OnInspectorGUI()
         {
+            serializedObject.Update();
+
             if (UdonSharpGUI.DrawConvertToUdonBehaviourButton(target) ||
                 UdonSharpGUI.DrawProgramSource(target))
                 return;
@@ -84,6 +88,7 @@ namespace UdonSharp.Video.Internal
             EditorGUI.BeginDisabledGroup(EditorApplication.isPlayingOrWillChangePlaymode);
             EditorGUILayout.PropertyField(defaultVolumeProperty);
             EditorGUI.EndDisabledGroup();
+
             EditorGUILayout.PropertyField(audioRangeProperty);
 
             if (EditorGUI.EndChangeCheck())
@@ -120,7 +125,6 @@ namespace UdonSharp.Video.Internal
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Playlist", EditorStyles.boldLabel);
-
             playlistList.DoLayoutList();
             EditorGUILayout.PropertyField(loopPlaylistProperty);
             EditorGUILayout.PropertyField(shufflePlaylistProperty);
@@ -129,25 +133,6 @@ namespace UdonSharp.Video.Internal
             EditorGUILayout.LabelField("Stream Settings", EditorStyles.boldLabel);
             
             EditorGUILayout.PropertyField(defaultStreamMode);
-
-            VRCAVProVideoPlayer avProPlayer = ((Component)target).GetComponentInChildren<VRCAVProVideoPlayer>(true);
-
-            if (avProPlayer)
-            {
-                EditorGUI.BeginChangeCheck();
-                bool newLowLatencyMode = EditorGUILayout.Toggle(new GUIContent("Low Latency Stream", "Whether the stream player should use low latency mode for RTSP streams"), avProPlayer.UseLowLatency);
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    //FieldInfo lowLatencyField = typeof(VRCAVProVideoPlayer).GetField("useLowLatency", BindingFlags.Instance | BindingFlags.NonPublic);
-
-                    SerializedObject avproPlayerSerializedObject = new SerializedObject(avProPlayer);
-                    SerializedProperty lowLatencyField = avproPlayerSerializedObject.FindProperty("useLowLatency");
-
-                    lowLatencyField.boolValue = newLowLatencyMode;
-                    avproPlayerSerializedObject.ApplyModifiedProperties();
-                }
-            }
 
             serializedObject.ApplyModifiedProperties();
         }
