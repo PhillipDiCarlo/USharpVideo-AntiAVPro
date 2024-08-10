@@ -1,10 +1,8 @@
-﻿
-using UdonSharp;
+﻿using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
 using VRC.Udon;
 using VRC.SDK3.Video.Components;
-using VRC.SDK3.Video.Components.AVPro;
 using VRC.SDK3.Video.Components.Base;
 
 #if UNITY_EDITOR && !COMPILER_UDONSHARP
@@ -28,14 +26,14 @@ namespace UdonSharp.Video
         public USharpVideoPlayer receiver;
 
         public VRCUnityVideoPlayer unityVideoPlayer;
-        public VRCAVProVideoPlayer avProPlayer;
+        public VideoPlayer unityVideoPlayer;
         public Renderer unityTextureRenderer;
-        public Renderer avProTextureRenderer;
+        
         public AudioSource[] audioSources;
 
         private BaseVRCVideoPlayer _currentPlayer;
         private MaterialPropertyBlock _fetchBlock;
-        private Material avproFetchMaterial;
+        
 
         private bool _initialized;
 
@@ -46,10 +44,10 @@ namespace UdonSharp.Video
 
             _currentPlayer = unityVideoPlayer;
 
+            RenderTexture targetTexture = unityVideoPlayer.targetTexture;
             Material m = unityTextureRenderer.material;
-            m = avProTextureRenderer.material;
             _fetchBlock = new MaterialPropertyBlock();
-            avproFetchMaterial = avProTextureRenderer.material;
+            unityFetchMaterial = unityTextureRenderer.material;
 
             _initialized = true;
         }
@@ -61,12 +59,22 @@ namespace UdonSharp.Video
 
         public override void OnVideoError(VRC.SDK3.Components.Video.VideoError videoError)
         {
-            receiver._OnVideoErrorCallback(videoError);
+            receiver.OnVideoError(videoError);
         }
 
         public override void OnVideoLoop()
         {
             receiver.OnVideoLoop();
+        }
+
+        public override void OnVideoStart()
+        {
+            receiver.OnVideoStart();
+        }
+
+        public override void OnVideoReady()
+        {
+            receiver.OnVideoReady();
         }
 
         public override void OnVideoPause()
@@ -79,136 +87,93 @@ namespace UdonSharp.Video
             receiver.OnVideoPlay();
         }
 
-        public override void OnVideoReady()
+        public override void OnVideoStop()
         {
-            receiver.OnVideoReady();
+            receiver.OnVideoStop();
         }
 
-        public override void OnVideoStart()
+        public void _UpdateFetchBlock()
         {
-            receiver.OnVideoStart();
+            unityTextureRenderer.GetPropertyBlock(_fetchBlock);
+            _fetchBlock.SetTexture("_MainTex", unityVideoPlayer.targetTexture);
+            unityTextureRenderer.SetPropertyBlock(_fetchBlock);
         }
 
-        public void Play() => _currentPlayer.Play();
-        public void Pause() => _currentPlayer.Pause();
-        public void Stop() => _currentPlayer.Stop();
-        public float GetTime() => _currentPlayer.GetTime();
-        public float GetDuration() => _currentPlayer.GetDuration();
-        public bool IsPlaying() => _currentPlayer.IsPlaying;
-        public void LoadURL(VRCUrl url) => _currentPlayer.LoadURL(url);
-        public void SetTime(float time) => _currentPlayer.SetTime(time);
-
-        public void SetLooping(bool loop)
+        public void _PlayVideo()
         {
-            unityVideoPlayer.Loop = loop;
-            avProPlayer.Loop = loop;
+            unityVideoPlayer.Play();
+            _UpdateFetchBlock();
         }
 
-        public void SetToStreamPlayerMode()
+        public void _StopVideo()
         {
-            if (_currentPlayer == avProPlayer)
-                return;
-
-            _currentPlayer.Stop();
-            _currentPlayer = avProPlayer;
+            unityVideoPlayer.Stop();
+            _UpdateFetchBlock();
         }
 
-        public void SetToVideoPlayerMode()
+        public void _PauseVideo()
         {
-            if (_currentPlayer == unityVideoPlayer)
-                return;
-
-            _currentPlayer.Stop();
-            _currentPlayer = unityVideoPlayer;
+            unityVideoPlayer.Pause();
+            _UpdateFetchBlock();
         }
 
-        public Texture GetVideoTexture()
+        public void _SetVideoTime(float time)
         {
-            if (_currentPlayer == unityVideoPlayer)
+            unityVideoPlayer.time = time;
+            _UpdateFetchBlock();
+        }
+
+        public void _SetVideoUrl(string url)
+        {
+            unityVideoPlayer.url = url;
+            _UpdateFetchBlock();
+        }
+
+        public void _SetAudioVolume(float volume)
+        {
+            foreach (var audioSource in audioSources)
             {
-                unityTextureRenderer.GetPropertyBlock(_fetchBlock);
-
-                return _fetchBlock.GetTexture("_MainTex");
-            }
-            else
-            {
-                return avproFetchMaterial.GetTexture("_MainTex");
+                audioSource.volume = volume;
             }
         }
-
-        private float _currentVolume = 1f;
-        private bool _currentlyMuted;
-
-        public float GetVolume() => _currentVolume;
-        public bool IsMuted() => _currentlyMuted;
-
-        public void SetVolume(float volume)
-        {
-            if (!_currentlyMuted)
-            {
-                // https://www.dr-lex.be/info-stuff/volumecontrols.html#ideal thanks TCL for help with finding and understanding this
-                // Using the 50dB dynamic range constants
-                float adjustedVolume = Mathf.Clamp01(3.1623e-3f * Mathf.Exp(volume * 5.757f) - 3.1623e-3f);
-
-                foreach (AudioSource audioSource in audioSources)
-                    audioSource.volume = adjustedVolume;
-            }
-
-            _currentVolume = volume;
-        }
-
-        public void SetMuted(bool muted)
-        {
-            _currentlyMuted = muted;
-
-            if (muted)
-            {
-                foreach (AudioSource audioSource in audioSources)
-                    audioSource.volume = 0f;
-            }
-            else
-            {
-                SetVolume(_currentVolume);
-            }
-        }
-    }
 
 #if UNITY_EDITOR && !COMPILER_UDONSHARP
-    [CustomEditor(typeof(VideoPlayerManager))]
-    internal class VideoPlayerManagerInspector : Editor
-    {
-        private SerializedProperty receiverProperty;
-        private SerializedProperty unityVideoProperty;
-        private SerializedProperty avProVideoProperty;
-        private SerializedProperty unityRendererProperty;
-        private SerializedProperty avProRendererProperty;
-        private SerializedProperty audioSourcesProperty;
-
-        private void OnEnable()
+        [CustomEditor(typeof(VideoPlayerManager))]
+        internal class VideoPlayerManagerInspector : Editor
         {
-            receiverProperty = serializedObject.FindProperty(nameof(VideoPlayerManager.receiver));
-            unityVideoProperty = serializedObject.FindProperty(nameof(VideoPlayerManager.unityVideoPlayer));
-            avProVideoProperty = serializedObject.FindProperty(nameof(VideoPlayerManager.avProPlayer));
-            unityRendererProperty = serializedObject.FindProperty(nameof(VideoPlayerManager.unityTextureRenderer));
-            avProRendererProperty = serializedObject.FindProperty(nameof(VideoPlayerManager.avProTextureRenderer));
-            audioSourcesProperty = serializedObject.FindProperty(nameof(VideoPlayerManager.audioSources));
+            private SerializedProperty receiverProperty;
+            private SerializedProperty unityVideoProperty;
+            private SerializedProperty avProVideoProperty;
+            private SerializedProperty unityRendererProperty;
+            private SerializedProperty avProRendererProperty;
+            private SerializedProperty audioSourcesProperty;
+
+            private void OnEnable()
+            {
+                receiverProperty = serializedObject.FindProperty(nameof(VideoPlayerManager.receiver));
+                unityVideoProperty = serializedObject.FindProperty(nameof(VideoPlayerManager.unityVideoPlayer));
+                avProVideoProperty = serializedObject.FindProperty(nameof(VideoPlayerManager.unityVideoPlayer));
+                unityRendererProperty = serializedObject.FindProperty(nameof(VideoPlayerManager.unityTextureRenderer));
+                avProRendererProperty = serializedObject.FindProperty(nameof(VideoPlayerManager.unityTextureRenderer));
+                audioSourcesProperty = serializedObject.FindProperty(nameof(VideoPlayerManager.audioSources));
+            }
+
+            public override void OnInspectorGUI()
+            {
+                if (UdonSharpGUI.DrawConvertToUdonBehaviourButton(target)) return;
+                if (UdonSharpGUI.DrawProgramSource(target, false)) return;
+
+                EditorGUILayout.HelpBox("Do not modify the video players on this game object, all modifications must be done on the USharpVideoPlayer. If you change the settings on these, you will break things.", MessageType.Warning);
+                EditorGUILayout.PropertyField(receiverProperty);
+                EditorGUILayout.PropertyField(unityVideoProperty);
+                EditorGUILayout.PropertyField(avProVideoProperty);
+                EditorGUILayout.PropertyField(unityRendererProperty);
+                EditorGUILayout.PropertyField(avProRendererProperty);
+                EditorGUILayout.PropertyField(audioSourcesProperty, true);
+
+                serializedObject.ApplyModifiedProperties();
+            }
         }
-
-        public override void OnInspectorGUI()
-        {
-            if (UdonSharpGUI.DrawConvertToUdonBehaviourButton(target)) return;
-            if (UdonSharpGUI.DrawProgramSource(target, false)) return;
-
-            EditorGUILayout.HelpBox("Do not modify the video players on this game object, all modifications must be done on the USharpVideoPlayer. If you change the settings on these, you will break things.", MessageType.Warning);
-            EditorGUILayout.PropertyField(receiverProperty);
-            EditorGUILayout.PropertyField(unityVideoProperty);
-            EditorGUILayout.PropertyField(avProVideoProperty);
-            EditorGUILayout.PropertyField(unityRendererProperty);
-            EditorGUILayout.PropertyField(avProRendererProperty);
-            EditorGUILayout.PropertyField(audioSourcesProperty, true);
-
-            serializedObject.ApplyModifiedProperties();
-        }
-    }
 #endif
+    }
 }

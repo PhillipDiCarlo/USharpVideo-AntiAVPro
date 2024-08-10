@@ -1,5 +1,4 @@
-﻿
-#define USE_SERVER_TIME_MS // Uses GetServerTimeMilliseconds instead of the server datetime which in theory is less reliable
+﻿#define USE_SERVER_TIME_MS // Uses GetServerTimeMilliseconds instead of the server datetime which in theory is less reliable
 
 using JetBrains.Annotations;
 using UdonSharp;
@@ -141,7 +140,6 @@ namespace UdonSharp.Video
 
         // Player mode tracking
         const int PLAYER_MODE_UNITY = 0;
-        const int PLAYER_MODE_AVPRO = 1;
 
         [UdonSynced]
         private int currentPlayerMode = PLAYER_MODE_UNITY;
@@ -174,7 +172,7 @@ namespace UdonSharp.Video
 
                 if (defaultStreamMode)
                 {
-                    SetPlayerMode(PLAYER_MODE_AVPRO);
+                    SetPlayerMode(PLAYER_MODE_UNITY);
                     _nextPlaylistIndex = 0; // SetPlayerMode sets this to -1, but we want to be able to keep it intact so reset to 0
                 }
 
@@ -199,23 +197,13 @@ namespace UdonSharp.Video
             
             LogMessage("USharpVideo v1.0.1 Initialized");
         }
-
-        public override void OnVideoReady()
+    
+            public override void OnVideoReady()
         {
             ResetVideoLoad();
             _playlistErrorCount = 0;
 
-            if (IsUsingAVProPlayer())
-            {
-                float duration = _videoPlayerManager.GetDuration();
-
-                if (duration == float.MaxValue || float.IsInfinity(duration) || IsRTSPStream())
-                    _videoSync = false;
-                else
-                    _videoSync = true;
-            }
-            else
-                _videoSync = true;
+            _videoSync = true;
 
             if (_videoSync)
             {
@@ -316,7 +304,7 @@ namespace UdonSharp.Video
         {
             string urlStr = _syncedURL.ToString();
 
-            return IsUsingAVProPlayer() &&
+            return
                    _videoPlayerManager.GetDuration() == 0f && 
                    IsRTSPURL(urlStr);
         }
@@ -406,7 +394,7 @@ namespace UdonSharp.Video
         public override void OnVideoPause() { }
         public override void OnVideoPlay() { }
 
-        public override void OnVideoLoop()
+                public override void OnVideoLoop()
         {
 #if USE_SERVER_TIME_MS
             _localNetworkTimeStart = _networkTimeVideoStart = Networking.GetServerTimeInMilliseconds();
@@ -662,7 +650,7 @@ namespace UdonSharp.Video
 
         private float _lastSyncTime;
 
-        private void SyncVideoIfTime()
+                private void SyncVideoIfTime()
         {
             float timeSinceStartup = Time.realtimeSinceStartup;
 
@@ -883,7 +871,7 @@ namespace UdonSharp.Video
             QueueRateLimitedSerialize();
         }
 
-        /// <summary>
+                /// <summary>
         /// Used on things that are easily spammable to prevent flooding the network unintentionally.
         /// Will allow 1 sync every half second and then will send a final sync to propagate the final changed values of things at the end
         /// </summary>
@@ -1069,58 +1057,6 @@ namespace UdonSharp.Video
         }
 
         /// <summary>
-        /// Sets the video player to use AVPro as the backend.
-        /// AVPro supports streams so this is aliased in UI as the "Stream" player to avoid confusion
-        /// </summary>
-        [PublicAPI]
-        public void SetToAVProPlayer()
-        {
-            if (CanControlVideoPlayer())
-            {
-                TakeOwnership();
-                SetPlayerMode(PLAYER_MODE_AVPRO);
-            }
-        }
-
-        private void SetPlayerMode(int newPlayerMode)
-        {
-            if (_localPlayerMode == newPlayerMode)
-                return;
-
-            StopVideo();
-
-            if (Networking.IsOwner(gameObject))
-                _syncedURL = VRCUrl.Empty;
-
-            currentPlayerMode = newPlayerMode;
-
-            _locallyPaused = _ownerPaused = false;
-
-            _nextPlaylistIndex = -1;
-            
-            _localPlayerMode = newPlayerMode;
-
-            ResetVideoLoad();
-
-            if (IsUsingUnityPlayer())
-            {
-                _videoPlayerManager.SetToVideoPlayerMode();
-                SetUIToVideoMode();
-            }
-            else
-            {
-                _videoPlayerManager.SetToStreamPlayerMode();
-                SetUIToStreamMode();
-            }
-
-            QueueSerialize();
-
-            UpdateRenderTexture();
-
-            SendCallback("OnUSharpVideoModeChange");
-        }
-
-        /// <summary>
         /// Are we playing a standard video where we know the length and need to sync its time across clients?
         /// </summary>
         /// <returns></returns>
@@ -1144,12 +1080,6 @@ namespace UdonSharp.Video
         public bool IsUsingUnityPlayer()
         {
             return _localPlayerMode == PLAYER_MODE_UNITY;
-        }
-
-        [PublicAPI]
-        public bool IsUsingAVProPlayer()
-        {
-            return _localPlayerMode == PLAYER_MODE_AVPRO;
         }
 
         /// <summary>
@@ -1402,7 +1332,7 @@ namespace UdonSharp.Video
         private void SetUIToStreamMode()
         {
             foreach (VideoControlHandler handler in _registeredControlHandlers)
-                handler.SetToStreamPlayerMode();
+                handler.SetToStreamMode();
         }
 
         private void SendUIOwnerUpdate()
@@ -1492,7 +1422,7 @@ namespace UdonSharp.Video
             {
                 if (handler)
                 {
-                    handler.UpdateVideoTexture(renderTexture, IsUsingAVProPlayer());
+                    handler.UpdateVideoTexture(renderTexture, false);
                 }
             }
 

@@ -1,5 +1,4 @@
-﻿
-using JetBrains.Annotations;
+﻿using JetBrains.Annotations;
 using UdonSharp;
 using UnityEngine;
 using UnityEngine.UI;
@@ -73,278 +72,155 @@ namespace UdonSharp.Video
 
         [Header("Video/Stream controls")]
         [SerializeField]
-        private SyncModeController syncController;
-
-        [Header("Volume")]
+        private GameObject videoControls;
+        
         [SerializeField]
-        private VolumeController volumeController;
+        private GameObject streamControls;
 
-        [Header("Style Colors")]
-        public Color redGraphicColor = new Color(0.632f, 0.19f, 0.19f);
-        public Color whiteGraphicColor = new Color(0.9433f, 0.9433f, 0.9433f);
-        public Color buttonBackgroundColor = new Color(1f, 1f, 1f, 1f);
-        public Color buttonActivatedColor = new Color(1f, 1f, 1f, 1f);
-        public Color iconInvertedColor = new Color(1f, 1f, 1f, 1f);
-#pragma warning restore CS0649
+        [SerializeField]
+        private Graphic videoModeButtonBackground;
 
-        private void OnEnable()
+        [SerializeField]
+        private Graphic videoModeButtonIcon;
+
+        [SerializeField]
+        private Graphic streamModeButtonBackground;
+
+        [SerializeField]
+        private Graphic streamModeButtonIcon;
+
+        [SerializeField]
+        private RectTransform screenFitterObject;
+
+        [SerializeField]
+        private Transform[] renderTargets;
+
+        [Header("Stream player controls")]
+        [SerializeField]
+        private GameObject avProRestartButton;
+
+        [SerializeField]
+        private GameObject avProModeIcon;
+
+        [SerializeField]
+        private GameObject avProModeButton;
+
+        [Header("Error UI Elements")]
+        [SerializeField]
+        private GameObject errorIconObject;
+
+        [SerializeField]
+        private Text errorMessageText;
+
+        [SerializeField]
+        private GameObject errorRetryButton;
+
+        [SerializeField]
+        private GameObject errorDetailsButton;
+
+        private RectTransform _currentScreenFitter;
+        private Vector3 _initialFitterScale;
+
+        private int _lastKnownWidth;
+        private int _lastKnownHeight;
+
+        private bool _fetching;
+
+        public void OnFetchVideoResolution(int width, int height)
         {
-            targetVideoPlayer.RegisterControlHandler(this);
-            UpdateMaster();
-            UpdateVideoOwner();
+            _lastKnownWidth = width;
+            _lastKnownHeight = height;
 
-            if (volumeController) volumeController.SetControlHandler(this);
+            // Adjusts the video render target's aspect ratio based on the video's resolution
+            float videoAspect = (float)width / height;
+            Vector2 fitterSize = screenFitterObject.sizeDelta;
+            float fitterAspect = fitterSize.x / fitterSize.y;
+
+            _currentScreenFitter = screenFitterObject;
+            _initialFitterScale = _currentScreenFitter.localScale;
+
+            if (videoAspect > fitterAspect)
+            {
+                _currentScreenFitter.localScale = new Vector3(1, fitterAspect / videoAspect, 1);
+            }
+            else
+            {
+                _currentScreenFitter.localScale = new Vector3(videoAspect / fitterAspect, 1, 1);
+            }
         }
 
-        private void OnDisable()
+        public void SetToUnityPlayer()
         {
-            targetVideoPlayer.UnregisterControlHandler(this);
+            targetVideoPlayer.SetToUnityPlayer();
         }
 
-        // Only allow the master to own this so we can check master by checking this object's owner
-        public override bool OnOwnershipRequest(VRCPlayerApi requestingPlayer, VRCPlayerApi requestedOwner)
+        public void SetToStreamPlayer()
         {
-            return false;
+            targetVideoPlayer.SetToUnityPlayer();
         }
 
         private void Update()
         {
-            RunUIUpdate();
-        }
-
-        public override void OnPlayerLeft(VRCPlayerApi player)
-        {
-            UpdateMaster();
-        }
-
-        public void OnVideoPlayerOwnerTransferred()
-        {
-            UpdateVideoOwner();
-        }
-
-        void UpdateMaster()
-        {
-#if !UNITY_EDITOR
-            // We know the owner of this will always be the master so just get the owner and update the name
-            if (masterField)
+            if (!_fetching)
             {
-                VRCPlayerApi owner = Networking.GetOwner(gameObject);
-                if (owner != null && owner.IsValid())
-                    masterField.text = Networking.GetOwner(gameObject).displayName;
+                _fetching = true;
+
+                // Update UI based on video player state
+                statusTextField.text = targetVideoPlayer.GetStatusText();
+                statusTextDropShadow.text = targetVideoPlayer.GetStatusText();
+                loopButtonBackground.color = targetVideoPlayer.IsLooping() ? Color.green : Color.red;
+                muteToggle.isOn = targetVideoPlayer.IsMuted();
+                volumeSlider.value = targetVideoPlayer.GetVolume();
+
+                _fetching = false;
             }
-#endif
         }
 
-        private void UpdateVideoOwner()
+        public void OnVolumeChanged()
         {
-#if !UNITY_EDITOR
-            if (ownerField)
-                ownerField.text = Networking.GetOwner(targetVideoPlayer.gameObject).displayName;
-#endif
-
-            SetLocked(targetVideoPlayer.IsLocked());
+            targetVideoPlayer.SetVolume(volumeSlider.value);
         }
 
-        [PublicAPI]
-        public void SetControlledVideoPlayer(USharpVideoPlayer newPlayer)
+        public void OnMuteToggled()
         {
-            if (newPlayer == targetVideoPlayer)
-                return;
+            targetVideoPlayer.SetMuted(muteToggle.isOn);
+        }
 
-            targetVideoPlayer.UnregisterControlHandler(this);
-            targetVideoPlayer = newPlayer;
-            targetVideoPlayer.RegisterControlHandler(this);
-            UpdateVideoOwner();
+        public void OnLoopToggled()
+        {
+            targetVideoPlayer.SetLooping(loopToggle.isOn);
+        }
 
-            SetStatusText("");
+        public void OnSeekSliderBeginDrag()
+        {
+            if (Networking.IsOwner(targetVideoPlayer.gameObject))
+                _draggingSlider = true;
+        }
+
+        public void OnSeekSliderEndDrag()
+        {
             _draggingSlider = false;
         }
 
-        string _currentStatusText = "";
-
-        public void SetStatusText(string newStatus)
+        public void OnSeekSliderChanged()
         {
-            _currentStatusText = newStatus;
-            if (statusTextField) statusTextField.text = _currentStatusText;
-            if (statusTextDropShadow) statusTextDropShadow.text = _currentStatusText;
-            _lastTime = int.MaxValue;
-        }
-        
-        public void SetLocked(bool locked)
-        {
-            if (locked)
-            {
-                if (masterLockedIcon) masterLockedIcon.SetActive(true);
-                if (masterUnlockedIcon) masterUnlockedIcon.SetActive(false);
+            if (!_draggingSlider)
+                return;
 
-                if (Networking.IsOwner(targetVideoPlayer.gameObject) || targetVideoPlayer.CanControlVideoPlayer())
-                {
-                    if (lockGraphic) lockGraphic.color = whiteGraphicColor;
-                    if (urlFieldPlaceholderText) urlFieldPlaceholderText.text = "Enter Video URL...";
-                }
-                else
-                {
-                    if (lockGraphic) lockGraphic.color = redGraphicColor;
-                    if (urlFieldPlaceholderText) urlFieldPlaceholderText.text = $"Only the master {Networking.GetOwner(targetVideoPlayer.gameObject).displayName} may add URLs";
-                }
-            }
-            else
-            {
-                if (masterLockedIcon) masterLockedIcon.SetActive(false);
-                if (masterUnlockedIcon) masterUnlockedIcon.SetActive(true);
-                if (lockGraphic) lockGraphic.color = whiteGraphicColor;
-                if (urlFieldPlaceholderText) urlFieldPlaceholderText.text = "Enter Video URL... (anyone)";
-            }
-        }
-        
-        public void SetPaused(bool paused)
-        {
-            bool videoMode = targetVideoPlayer.IsInVideoMode();
-
-            if (pauseIcon) pauseIcon.SetActive(videoMode);
-            if (stopIcon) stopIcon.SetActive(!videoMode);
-
-            if (playObject) playObject.SetActive(paused);
-            if (pauseStopObject) pauseStopObject.SetActive(!paused);
+            float progress = progressSlider.value / progressSlider.maxValue;
+            targetVideoPlayer.SeekTo(progress);
         }
 
-        public void SetLooping(bool looping)
+        public void SetElapsedTime(float elapsedTime)
         {
-            if (looping)
-            {
-                if (loopButtonBackground) loopButtonBackground.color = buttonActivatedColor;
-                if (loopButtonIcon) loopButtonIcon.color = iconInvertedColor;
-            }
-            else
-            {
-                if (loopButtonBackground) loopButtonBackground.color = buttonBackgroundColor;
-                if (loopButtonIcon) loopButtonIcon.color = whiteGraphicColor;
-            }
+            elapsedTimeText.text = GetFormattedTime(System.TimeSpan.FromSeconds(elapsedTime));
         }
 
-        public void SetVolume(float volume)
+        public void SetTotalTime(float totalTime)
         {
-            if (volumeController) volumeController.SetVolume(volume);
+            totalTimeText.text = GetFormattedTime(System.TimeSpan.FromSeconds(totalTime));
         }
 
-        public void SetMuted(bool muted)
-        {
-            if (volumeController) volumeController.SetMuted(muted);
-        }
-
-        public void OnVolumeSliderChange(float volume)
-        {
-            targetVideoPlayer.SetVolume(volume);
-        }
-
-        public void OnMutePress(bool muted)
-        {
-            targetVideoPlayer.SetMuted(muted);
-        }
-
-        /// <summary>
-        /// Adds a URL to the history display so people can copy it
-        /// </summary>
-        /// <param name="url"></param>
-        public void AddURLToHistory(VRCUrl url)
-        {
-            if (currentURLField)
-            {
-                if (previousURLField)
-                    previousURLField.text = currentURLField.text;
-
-                currentURLField.text = url.Get();
-            }
-        }
-
-        public void SetToVideoPlayerMode()
-        {
-            if (syncController)
-                syncController.SetVideoVisual();
-        }
-
-        public void SetToStreamPlayerMode()
-        {
-            if (syncController)
-                syncController.SetStreamVisual();
-        }
-
-        private int _lastTime = int.MaxValue;
-
-        /// <summary>
-        /// Updates UI elements such as the time readout, URL views, and seek bar
-        /// </summary>
-        private void RunUIUpdate()
-        {
-            if (targetVideoPlayer.IsInVideoMode())
-            {
-                VideoPlayerManager manager = targetVideoPlayer.GetVideoManager();
-                float duration = manager.GetDuration();
-
-                if (_draggingSlider)
-                {
-                    float currentProgress = progressSlider.value;
-                    float currentTime = duration * currentProgress;
-
-                    targetVideoPlayer.SeekTo(currentProgress);
-
-                    string currentTimeStr = GetFormattedTime(System.TimeSpan.FromSeconds(currentTime));
-
-                    if (statusTextField) statusTextField.text = currentTimeStr;
-                    if (statusTextDropShadow) statusTextDropShadow.text = currentTimeStr;
-                }
-                else
-                {
-                    float currentTime = manager.GetTime();
-
-                    if (progressSlider)
-                    {
-                        if (duration > 0f)
-                        {
-                            progressSlider.gameObject.SetActive(true);
-                            progressSlider.value = Mathf.Clamp01(currentTime / duration);
-                        }
-                        else
-                        {
-                            progressSlider.gameObject.SetActive(false);
-                        }
-                    }
-
-                    int currentTimeInt = Mathf.RoundToInt(currentTime);
-                    if (currentTimeInt != _lastTime)
-                    {
-                        _lastTime = currentTimeInt;
-
-                        if (!float.IsInfinity(duration) & duration != float.MaxValue)
-                        {
-                            if (string.IsNullOrEmpty(_currentStatusText))
-                            {
-                                System.TimeSpan durationTimespan = System.TimeSpan.FromSeconds(duration);
-                                System.TimeSpan currentTimeTimespan = System.TimeSpan.FromSeconds(currentTime);
-
-                                string totalTimeStr = GetFormattedTime(durationTimespan);
-                                string currentTimeStr = GetFormattedTime(currentTimeTimespan);
-
-                                string statusStr = currentTimeStr + "/" + totalTimeStr;
-
-                                if (statusTextField) statusTextField.text = statusStr;
-                                if (statusTextDropShadow) statusTextDropShadow.text = statusStr;
-                            }
-                        }
-                    }
-                }
-            }
-            else
-            {
-                if (progressSlider) progressSlider.gameObject.SetActive(false);
-            }
-        }
-
-        /// <summary>
-        /// Gets a time string in the format hh:mm:ss, handles hours properly for long-running videos that wrap the hh section.
-        /// </summary>
-        /// <param name="time"></param>
-        /// <returns></returns>
         private string GetFormattedTime(System.TimeSpan time)
         {
             return ((int)time.TotalHours).ToString("D2") + time.ToString(@"\:mm\:ss");
@@ -392,30 +268,106 @@ namespace UdonSharp.Video
             targetVideoPlayer.SetToUnityPlayer();
         }
 
-        public void OnStreamPlayerModeButtonPressed()
+        public void SetMuted(bool muted)
         {
-            targetVideoPlayer.SetToAVProPlayer();
+            if (volumeController) volumeController.SetMuted(muted);
         }
 
-        public void OnSeekSliderChanged()
+        public void SetVolume(float volume)
         {
-            //if (!_draggingSlider)
-            //    return;
-
-
+            if (volumeController) volumeController.SetVolume(volume);
         }
 
-        private bool _draggingSlider;
-
-        public void OnSeekSliderBeginDrag()
+        public void SetPaused(bool paused)
         {
-            if (Networking.IsOwner(targetVideoPlayer.gameObject))
-                _draggingSlider = true;
+            bool videoMode = targetVideoPlayer.IsInVideoMode();
+
+            if (pauseIcon) pauseIcon.SetActive(videoMode);
+            if (stopIcon) stopIcon.SetActive(!videoMode);
+
+            if (playObject) playObject.SetActive(paused);
+            if (pauseStopObject) pauseStopObject.SetActive(!paused);
         }
 
-        public void OnSeekSliderEndDrag()
+        public void SetLocked(bool locked)
         {
+            if (locked)
+            {
+                if (masterLockedIcon) masterLockedIcon.SetActive(true);
+                if (masterUnlockedIcon) masterUnlockedIcon.SetActive(false);
+
+                if (Networking.IsOwner(targetVideoPlayer.gameObject) || targetVideoPlayer.CanControlVideoPlayer())
+                {
+                    if (lockGraphic) lockGraphic.color = whiteGraphicColor;
+                    if (urlFieldPlaceholderText) urlFieldPlaceholderText.text = "Enter Video URL...";
+                }
+                else
+                {
+                    if (lockGraphic) lockGraphic.color = redGraphicColor;
+                    if (urlFieldPlaceholderText) urlFieldPlaceholderText.text = $"Only the master {Networking.GetOwner(targetVideoPlayer.gameObject).displayName} may add URLs";
+                }
+            }
+            else
+            {
+                if (masterLockedIcon) masterLockedIcon.SetActive(false);
+                if (masterUnlockedIcon) masterUnlockedIcon.SetActive(true);
+                if (lockGraphic) lockGraphic.color = whiteGraphicColor;
+                if (urlFieldPlaceholderText) urlFieldPlaceholderText.text = "Enter Video URL... (anyone)";
+            }
+        }
+
+        public void SetStatusText(string newStatus)
+        {
+            _currentStatusText = newStatus;
+            if (statusTextField) statusTextField.text = _currentStatusText;
+            if (statusTextDropShadow) statusTextDropShadow.text = _currentStatusText;
+            _lastTime = int.MaxValue;
+        }
+
+        public void SetControlledVideoPlayer(USharpVideoPlayer newPlayer)
+        {
+            if (newPlayer == targetVideoPlayer)
+                return;
+
+            targetVideoPlayer.UnregisterControlHandler(this);
+            targetVideoPlayer = newPlayer;
+            targetVideoPlayer.RegisterControlHandler(this);
+            UpdateVideoOwner();
+
+            SetStatusText("");
             _draggingSlider = false;
+        }
+
+        public override void OnPlayerLeft(VRCPlayerApi player)
+        {
+            UpdateMaster();
+        }
+
+        public void OnVideoPlayerOwnerTransferred()
+        {
+            UpdateVideoOwner();
+        }
+        void UpdateMaster()
+        {
+        #if !UNITY_EDITOR
+        // We know the owner of this will always be the master so just get the owner and update the name
+            if (masterField)
+            {
+                VRCPlayerApi owner = Networking.GetOwner(gameObject);
+                if (owner != null && owner.IsValid())
+                    masterField.text = Networking.GetOwner(gameObject).displayName;
+            }
+        #endif
+        }
+
+        private void UpdateVideoOwner()
+        {
+        #if !UNITY_EDITOR
+            if (ownerField)
+                ownerField.text = Networking.GetOwner(targetVideoPlayer.gameObject).displayName;
+        #endif
+
+            SetLocked(targetVideoPlayer.IsLocked());
         }
     }
 }
